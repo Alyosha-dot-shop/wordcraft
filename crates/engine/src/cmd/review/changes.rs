@@ -96,10 +96,33 @@ fn resolve_cell(s: &mut Session, story: StoryRef, path: &wordcraft_doc::Path, ac
             row.props.del = None;
         }
     }
-    if resolve_row_deletion && accept && c == 0 && t.rows.len() > 1 && t.rows.get(r).is_some_and(|x| x.props.del.is_some()) {
+    let delete_row = resolve_row_deletion && accept && c == 0 && t.rows.get(r).is_some_and(|x| x.props.del.is_some());
+    let delete_table = delete_row && t.rows.len() == 1;
+    if delete_table {
+        s.doc.remove_block(story, &tp)?;
+        s.sel = Selection::caret(s.doc.clamp(&Pos { story, path: tp, off: 0 }));
+        return Ok(true);
+    }
+    if delete_row {
         t.delete_row(r);
     }
     Ok(true)
+}
+
+/// Whether a selection covers every paragraph in a row, including both cell boundaries.
+fn range_covers_row(s: &Session, story: StoryRef, path: &wordcraft_doc::Path, a: &Pos, b: &Pos) -> bool {
+    let Some((table, row, _)) = path.cell() else { return false };
+    let mut first = None;
+    let mut last = None;
+    for p in s.doc.para_paths(story) {
+        if p.cell().is_some_and(|(t, r, _)| t == table && r == row) {
+            first.get_or_insert_with(|| p.clone());
+            last = Some(p);
+        }
+    }
+    let (Some(first), Some(last)) = (first, last) else { return false };
+    let end = s.doc.para(story, &last).map(|p| p.len()).unwrap_or(0);
+    (&a.path, a.off) <= (&first, 0) && (&b.path, b.off) >= (&last, end)
 }
 
 /// A tracked change, for navigation and the Reviewing Pane: its range, kind (`insert`,
@@ -312,7 +335,8 @@ fn resolve_sel(s: &mut Session, accept: bool, next: bool) -> CmdResult {
         let props = (ranged && (path != b.path || to > from)) || caret_props.as_ref() == Some(&path);
         resolve_para(s, a.story, &path, from, to, mark, props, accept)?;
         if ranged {
-            resolve_cell(s, a.story, &path, accept, false)?;
+            let resolve_row_deletion = range_covers_row(s, a.story, &path, &a, &b);
+            resolve_cell(s, a.story, &path, accept, resolve_row_deletion)?;
         }
     }
     crate::cmd::moves::resolve(s, &moves, accept)?;
