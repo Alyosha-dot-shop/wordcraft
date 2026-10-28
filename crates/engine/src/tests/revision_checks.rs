@@ -501,3 +501,17 @@ fn tracked_delete_rows_and_table_mark_the_rows_deleted_like_word() {
     run(&mut s, "review.acceptAll", json!({}));
     assert!(table(&s).is_none(), "accepting a deleted table removes it");
 }
+
+#[test]
+fn accepting_a_partial_first_cell_selection_does_not_accept_row_deletion() {
+    let mut s = table_session();
+    run(&mut s, "review.trackChanges", json!({"value": true}));
+    caret_in(&mut s, 1, 0, 0);
+    run(&mut s, "table.deleteRow", json!({}));
+    s.sel = Selection {
+        anchor: Pos { story: StoryRef::Body, path: wordcraft_doc::Path(vec![0, 1, 0, 0]), off: 0 },
+        focus: Pos { story: StoryRef::Body, path: wordcraft_doc::Path(vec![0, 1, 0, 0]), off: 1 },
+    };
+    run(&mut s, "review.accept", json!({}));
+    assert_eq!(row_del(&s), [false, true]);
+}
