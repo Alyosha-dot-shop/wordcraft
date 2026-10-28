@@ -113,7 +113,8 @@ impl Writer<'_> {
             }
             w.open("w:tr", &[]);
             let chg = r.props.fmt_change.as_ref().map(|c| self.change_attrs(c.rev));
-            trpr(w, &r.props, chg.as_ref());
+            let del = r.props.del.filter(|i| self.rev_kind(Some(*i)) == Some(RevisionKind::Delete)).map(|i| self.change_attrs(i));
+            trpr(w, &r.props, chg.as_ref(), del.as_ref());
             let mut open_cells = 0u32;
             for c in &r.cells {
                 for ctl in &c.controls.open {

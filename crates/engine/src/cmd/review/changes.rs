@@ -77,7 +77,7 @@ fn resolve_cell(s: &mut Session, story: StoryRef, path: &wordcraft_doc::Path, ac
     let has = s.doc.table(story, &tp).is_some_and(|t| {
         let row = t.rows.get(r);
         t.props.fmt_change.is_some()
-            || row.is_some_and(|x| x.props.fmt_change.is_some())
+            || row.is_some_and(|x| x.props.fmt_change.is_some() || x.props.del.is_some())
             || row.and_then(|x| x.cells.get(c)).is_some_and(|x| x.props.fmt_change.is_some())
     });
     if !has {
@@ -90,6 +90,14 @@ fn resolve_cell(s: &mut Session, story: StoryRef, path: &wordcraft_doc::Path, ac
         if let Some(cell) = row.cells.get_mut(c) {
             fmt_revisions::resolve_cell(cell, accept);
         }
+        // Rejecting keeps the row. Accepting removes it below, on its first cell's turn: a range
+        // resolves its cells last to first, so the row's other cells are done by then.
+        if !accept {
+            row.props.del = None;
+        }
+    }
+    if accept && c == 0 && t.rows.len() > 1 && t.rows.get(r).is_some_and(|x| x.props.del.is_some()) {
+        t.delete_row(r);
     }
     Ok(true)
 }
