@@ -517,6 +517,20 @@ fn accepting_a_partial_first_cell_selection_does_not_accept_row_deletion() {
 }
 
 #[test]
+fn accepting_a_deleted_row_from_any_cell_removes_it() {
+    let mut s = table_session();
+    let b2 = wordcraft_doc::Path(vec![0, 1, 1, 0]);
+    s.sel = Selection { anchor: Pos { story: StoryRef::Body, path: b2.clone(), off: 0 }, focus: Pos { story: StoryRef::Body, path: b2, off: 2 } };
+    run(&mut s, "text.delete", json!({}));
+    run(&mut s, "review.trackChanges", json!({"value": true}));
+    caret_in(&mut s, 1, 0, 0);
+    run(&mut s, "table.deleteRow", json!({}));
+    caret_in(&mut s, 1, 1, 0);
+    run(&mut s, "review.accept", json!({}));
+    assert_eq!(cells(&s), [["A1", "B1"]]);
+}
+
+#[test]
 fn accepting_a_full_row_selection_accepts_its_row_deletion() {
     let mut s = table_session();
     run(&mut s, "review.trackChanges", json!({"value": true}));

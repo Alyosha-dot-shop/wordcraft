@@ -69,7 +69,14 @@ fn resolve_para(
 
 /// Accept or reject the changes of the table cell `path` is in: the table's, its row's and the
 /// cell's own. Returns whether there were any.
-fn resolve_cell(s: &mut Session, story: StoryRef, path: &wordcraft_doc::Path, accept: bool, resolve_row_deletion: bool) -> Result<bool, CmdError> {
+fn resolve_cell(
+    s: &mut Session,
+    story: StoryRef,
+    path: &wordcraft_doc::Path,
+    accept: bool,
+    resolve_row_deletion: bool,
+    caret_in_row: bool,
+) -> Result<bool, CmdError> {
     let Some((tp, r, c)) = path.cell() else { return Ok(false) };
     let has = s.doc.table(story, &tp).is_some_and(|t| {
         let row = t.rows.get(r);
@@ -93,7 +100,7 @@ fn resolve_cell(s: &mut Session, story: StoryRef, path: &wordcraft_doc::Path, ac
             row.props.del = None;
         }
     }
-    let delete_row = resolve_row_deletion && accept && c == 0 && t.rows.get(r).is_some_and(|x| x.props.del.is_some());
+    let delete_row = resolve_row_deletion && accept && (c == 0 || caret_in_row) && t.rows.get(r).is_some_and(|x| x.props.del.is_some());
     let delete_table = delete_row && t.rows.len() == 1;
     if delete_table {
         s.doc.remove_block(story, &tp)?;
@@ -312,7 +319,7 @@ fn resolve_sel(s: &mut Session, accept: bool, next: bool) -> CmdResult {
                 (a.clone(), a)
             }
             None => {
-                if resolve_cell(s, a.story, &a.path, accept, true)? {
+                if resolve_cell(s, a.story, &a.path, accept, true, true)? {
                     return if next { select_next_unresolved(s) } else { sel_result(s) };
                 }
                 return nav_change(s, 1);
@@ -333,7 +340,7 @@ fn resolve_sel(s: &mut Session, accept: bool, next: bool) -> CmdResult {
         resolve_para(s, a.story, &path, (from, to), (mark, props), accept)?;
         if ranged {
             let resolve_row_deletion = range_covers_row(s, a.story, &path, &a, &b);
-            resolve_cell(s, a.story, &path, accept, resolve_row_deletion)?;
+            resolve_cell(s, a.story, &path, accept, resolve_row_deletion, false)?;
         }
     }
     crate::cmd::moves::resolve(s, &moves, accept)?;
