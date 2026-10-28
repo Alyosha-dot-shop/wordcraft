@@ -330,6 +330,17 @@ fn resolve_sel(s: &mut Session, accept: bool, next: bool) -> CmdResult {
     };
     // Moves with an end in the range: their other ends go with them.
     let moves = crate::cmd::moves::names_in(s, &a, &b, caret_mark.as_ref());
+    let mut row_coverage = Vec::new();
+    if ranged {
+        for path in s.doc.paths_between(&a, &b) {
+            let Some((table, row, _)) = path.cell() else { continue };
+            if row_coverage.iter().any(|(seen_table, seen_row, _)| *seen_table == table && *seen_row == row) {
+                continue;
+            }
+            let covered = range_covers_row(s, a.story, &path, &a, &b);
+            row_coverage.push((table, row, covered));
+        }
+    }
     for path in s.doc.paths_between(&a, &b).into_iter().rev() {
         let len = s.doc.para(a.story, &path).map(|p| p.len()).unwrap_or(0);
         let from = if path == a.path { a.off } else { 0 };
@@ -339,7 +350,9 @@ fn resolve_sel(s: &mut Session, accept: bool, next: bool) -> CmdResult {
         let props = (ranged && (path != b.path || to > from)) || caret_props.as_ref() == Some(&path);
         resolve_para(s, a.story, &path, (from, to), (mark, props), accept)?;
         if ranged {
-            let resolve_row_deletion = range_covers_row(s, a.story, &path, &a, &b);
+            let resolve_row_deletion = path.cell().is_some_and(|(table, row, _)| {
+                row_coverage.iter().any(|(covered_table, covered_row, covered)| *covered && *covered_table == table && *covered_row == row)
+            });
             resolve_cell(s, a.story, &path, accept, resolve_row_deletion, false)?;
         }
     }
