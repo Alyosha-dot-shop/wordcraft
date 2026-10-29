@@ -1,18 +1,27 @@
 use super::cells::{cell, selected_cells};
 use super::clear::{cell_prefix, guard_delete, text_spans};
 use super::layout::{fix_caret, sync_cell_widths};
-use super::{Block, CmdError, CmdResult, Paragraph, Pos, Selection, Session, Value, json, p, sel_result};
+use super::{Block, CmdError, CmdResult, Paragraph, Pos, RevisionKind, Selection, Session, Value, json, p, sel_result};
 
 /// Insert Above / Below: rows like the caret's, as many as the selection spans; the caret goes into the first.
+/// With Track Changes on, the new rows are a tracked row insertion (`w:trPr/w:ins`), as in Word.
 pub(in crate::cmd) fn row(s: &mut Session, below: bool) -> CmdResult {
     let (tp, r, c) = cell(s)?;
     let cells = selected_cells(s);
     let n = cells.iter().map(|x| x.0).collect::<std::collections::BTreeSet<_>>().len().max(1);
+    let at = if below { r + 1 } else { r };
+    let rid = s.doc.settings.track_changes.then(|| crate::cmd::new_revision(s, RevisionKind::Insert));
     let t = s.doc.table_mut(s.sel.focus.story, &tp)?;
+    let before = t.rows.len();
     for _ in 0..n {
-        t.insert_row(if below { r + 1 } else { r }, r);
+        t.insert_row(at, r);
     }
-    fix_caret(s, &tp, if below { r + 1 } else { r }, c)
+    // Fewer than `n` when the table is at its row limit.
+    let added = t.rows.len() - before;
+    for row in t.rows.iter_mut().skip(at).take(added) {
+        row.props.ins = rid;
+    }
+    fix_caret(s, &tp, at, c)
 }
 
 /// Insert Left / Right: a column beside the caret's cell; the caret goes into it.

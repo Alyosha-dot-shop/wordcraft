@@ -561,3 +561,65 @@ fn accepting_the_only_deleted_row_removes_its_table_and_keeps_a_valid_selection(
     assert!(table(&s).is_none());
     assert!(s.doc.para_at(&s.sel.focus).is_some());
 }
+
+fn row_ins(s: &Session) -> Vec<bool> {
+    table(s).map(|t| t.rows.iter().map(|r| r.props.ins.is_some()).collect()).unwrap_or_default()
+}
+
+#[test]
+fn tracked_insert_rows_mark_the_rows_inserted_like_word() {
+    let mut s = table_session();
+    run(&mut s, "review.trackChanges", json!({"value": true}));
+    run(&mut s, "table.insertRowBelow", json!({}));
+    assert_eq!(row_ins(&s), [false, true, false]);
+    // Word writes `<w:trPr><w:ins/></w:trPr>` on the new row, and it survives a save and reopen.
+    let bytes = wordcraft_docx::write(&s.doc).unwrap();
+    let back = wordcraft_docx::read(&bytes).unwrap();
+    let t = back.body.iter().find_map(|b| b.as_table()).unwrap();
+    assert_eq!(t.rows.iter().map(|r| r.props.ins.is_some()).collect::<Vec<_>>(), [false, true, false]);
+    // Accept keeps the row; Reject removes it.
+    let mut accepted = Session::new(back.clone());
+    run(&mut accepted, "review.acceptAll", json!({}));
+    assert_eq!((row_ins(&accepted), cells(&accepted).len()), ([false, false, false].to_vec(), 3));
+    let mut rejected = Session::new(back);
+    run(&mut rejected, "review.rejectAll", json!({}));
+    assert_eq!(cells(&rejected), [["A1", "B1"], ["A2", "B2"]]);
+}
+
+#[test]
+fn rejecting_an_inserted_row_from_its_cell_removes_it() {
+    let mut s = table_session();
+    run(&mut s, "review.trackChanges", json!({"value": true}));
+    run(&mut s, "table.insertRowBelow", json!({}));
+    caret_in(&mut s, 1, 1, 0);
+    run(&mut s, "review.reject", json!({}));
+    assert_eq!(cells(&s), [["A1", "B1"], ["A2", "B2"]]);
+}
+
+#[test]
+fn tracked_insert_table_marks_its_rows_inserted() {
+    let mut s = Session::new(wordcraft_doc::Document::new());
+    run(&mut s, "review.trackChanges", json!({"value": true}));
+    run(&mut s, "insert.table", json!({"rows": 2, "cols": 2}));
+    assert_eq!(row_ins(&s), [true, true]);
+    let mut accepted = Session::new(s.doc.clone());
+    run(&mut accepted, "review.acceptAll", json!({}));
+    assert_eq!(row_ins(&accepted), [false, false]);
+    run(&mut s, "review.rejectAll", json!({}));
+    assert!(table(&s).is_none(), "rejecting an inserted table removes it");
+}
+
+/// Rejecting a row's formatting change restores its old properties, but not over its insertion:
+/// Reject All still removes the row.
+#[test]
+fn rejecting_an_inserted_row_with_a_formatting_change_removes_it() {
+    let mut s = table_session();
+    run(&mut s, "review.trackChanges", json!({"value": true}));
+    run(&mut s, "table.insertRowBelow", json!({}));
+    caret_in(&mut s, 1, 0, 0);
+    run(&mut s, "table.rowHeight", json!({"height": 30.0}));
+    let row = &table(&s).unwrap().rows[1];
+    assert!(row.props.ins.is_some() && row.props.fmt_change.is_some(), "{:?}", row.props);
+    run(&mut s, "review.rejectAll", json!({}));
+    assert_eq!(cells(&s), [["A1", "B1"], ["A2", "B2"]]);
+}

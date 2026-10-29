@@ -68,20 +68,21 @@ fn resolve_para(
 }
 
 /// Accept or reject the changes of the table cell `path` is in: the table's, its row's and the
-/// cell's own. Returns whether there were any.
+/// cell's own, and with `resolve_row_marks` the row's tracked insertion or deletion. Returns
+/// whether there were any.
 fn resolve_cell(
     s: &mut Session,
     story: StoryRef,
     path: &wordcraft_doc::Path,
     accept: bool,
-    resolve_row_deletion: bool,
+    resolve_row_marks: bool,
     caret_in_row: bool,
 ) -> Result<bool, CmdError> {
     let Some((tp, r, c)) = path.cell() else { return Ok(false) };
     let has = s.doc.table(story, &tp).is_some_and(|t| {
         let row = t.rows.get(r);
         t.props.fmt_change.is_some()
-            || row.is_some_and(|x| x.props.fmt_change.is_some() || (resolve_row_deletion && x.props.del.is_some()))
+            || row.is_some_and(|x| x.props.fmt_change.is_some() || (resolve_row_marks && (x.props.ins.is_some() || x.props.del.is_some())))
             || row.and_then(|x| x.cells.get(c)).is_some_and(|x| x.props.fmt_change.is_some())
     });
     if !has {
@@ -94,13 +95,19 @@ fn resolve_cell(
         if let Some(cell) = row.cells.get_mut(c) {
             fmt_revisions::resolve_cell(cell, accept);
         }
-        // Rejecting keeps the row. Accepting removes it below, on its first cell's turn: a range
-        // resolves its cells last to first, so the row's other cells are done by then.
-        if !accept && resolve_row_deletion {
-            row.props.del = None;
+        // Rejecting a deletion or accepting an insertion keeps the row. Accepting a deletion or
+        // rejecting an insertion removes it below, on its first cell's turn: a range resolves its
+        // cells last to first, so the row's other cells are done by then.
+        if resolve_row_marks {
+            if accept {
+                row.props.ins = None;
+            } else {
+                row.props.del = None;
+            }
         }
     }
-    let delete_row = resolve_row_deletion && accept && (c == 0 || caret_in_row) && t.rows.get(r).is_some_and(|x| x.props.del.is_some());
+    let goes = |x: &wordcraft_doc::Row| if accept { x.props.del.is_some() } else { x.props.ins.is_some() };
+    let delete_row = resolve_row_marks && (c == 0 || caret_in_row) && t.rows.get(r).is_some_and(goes);
     let delete_table = delete_row && t.rows.len() == 1;
     if delete_table {
         s.doc.remove_block(story, &tp)?;
@@ -350,10 +357,10 @@ fn resolve_sel(s: &mut Session, accept: bool, next: bool) -> CmdResult {
         let props = (ranged && (path != b.path || to > from)) || caret_props.as_ref() == Some(&path);
         resolve_para(s, a.story, &path, (from, to), (mark, props), accept)?;
         if ranged {
-            let resolve_row_deletion = path.cell().is_some_and(|(table, row, _)| {
+            let resolve_row_marks = path.cell().is_some_and(|(table, row, _)| {
                 row_coverage.iter().any(|(covered_table, covered_row, covered)| *covered && *covered_table == table && *covered_row == row)
             });
-            resolve_cell(s, a.story, &path, accept, resolve_row_deletion, false)?;
+            resolve_cell(s, a.story, &path, accept, resolve_row_marks, false)?;
         }
     }
     crate::cmd::moves::resolve(s, &moves, accept)?;
